@@ -159,7 +159,7 @@ class _HARequestHandler(BaseHTTPRequestHandler):
 
 def show_usage():
         print('p1server.py -s <server_ip> -t <token> [-p <dsmr_port>] [-o HA]')
-        print('    -o HA will use dsmr integration in HA, otherwise dsmr-reader api is used')
+        print('    -o HA will use dsmr integration in HA, otherwise dsmr_reader api is used')
 
 def run_server(argv):
     port = '8811'
