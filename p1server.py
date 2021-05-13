@@ -32,8 +32,8 @@ import getopt
 # "phase_power_current_l2":3,
 # "phase_power_current_l3":3}]}
 
-dsmr_server = ""
-dsmr_token = ""
+server = ""
+token = ""
 
 
 class _RequestHandler(BaseHTTPRequestHandler):
@@ -47,10 +47,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        global dsmr_server
-        global dsmr_token
+        global server
+        global token
         self._set_headers()
-        content = urllib.request.urlopen(urllib.request.Request(f"http://{dsmr_server}:7777/api/v2/datalogger/dsmrreading?limit=1&ordering=-timestamp", headers = {"Authorization": f"Token {dsmr_token}"})).read()
+        content = urllib.request.urlopen(urllib.request.Request(f"http://{server}:7777/api/v2/datalogger/dsmrreading?limit=1&ordering=-timestamp", headers = {"Authorization": f"Token {token}"})).read()
         dsmr_data = json.loads(content)["results"][0]
         youless_data_all = list()
         youless_data = dict()
@@ -62,7 +62,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         n1 = float(dsmr_data["electricity_returned_1"])
         n2 = float(dsmr_data["electricity_returned_2"])
         net = round(p1 + p2 - n1 - n2,3)
-        content = urllib.request.urlopen(urllib.request.Request(f"http://{dsmr_server}:7777/api/v2/consumption/gas?limit=1&offset=1&ordering=-timestamp", headers = {"Authorization": f"Token {dsmr_token}"})).read()
+        content = urllib.request.urlopen(urllib.request.Request(f"http://{server}:7777/api/v2/consumption/gas?limit=1&ordering=-read_at", headers = {"Authorization": f"Token {token}"})).read()
         dsmr_data = json.loads(content)["results"][0]
         gas = float(dsmr_data["delivered"])
         youless_data_all.append(youless_data)
@@ -86,31 +86,112 @@ class _RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class _HARequestHandler(BaseHTTPRequestHandler):
+    # Borrowing from https://gist.github.com/nitaku/10d0662536f37a087e1b
+    def _set_headers(self):
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header('Content-type', 'application/json')
+        # Allow requests from any origin, so CORS policies don't
+        # prevent local development.
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+    
+    def get_timestamp(self, sensor):
+        global server
+        global token
+        content = urllib.request.urlopen(
+            urllib.request.Request(f"https://{server}:8123/api/states/sensor.{sensor}", 
+            headers = {"Authorization": f"Bearer {token}"})
+            ).read()
+        answer = json.loads(content)
+        return answer["last_changed"]
+
+    def get_data(self, sensor):
+        global server
+        global token
+        address = f"https://{server}:8123/api/states/sensor.{sensor}"
+        header = f"Bearer {token}"
+        #print(f"getting {address}")
+        #print(f"with header {header}")
+        content = urllib.request.urlopen(
+                urllib.request.Request(url = address, headers = {"Authorization": header})
+            ).read()
+        answer = json.loads(content)
+        return answer["state"]
+
+    def do_GET(self):
+        global server
+        global token
+        self._set_headers()
+        youless_data_all = list()
+        youless_data = dict()
+        p1 = float(self.get_data("energy_consumption_tarif_1"))
+        p2 = float(self.get_data("energy_consumption_tarif_2"))
+        n1 = float(self.get_data("energy_production_tarif_1"))
+        n2 = float(self.get_data("energy_production_tarif_2"))
+        current_cons = float(self.get_data("power_consumption"))
+        current_prod = float(self.get_data("power_production"))
+        gas = float(self.get_data("gas_consumption"))
+        timestamp = self.get_timestamp("energy_consumption_tarif_1")
+        
+        tm = int(dp.parse(timestamp).timestamp())
+        pwr = int(current_cons*1000 - current_prod*1000)
+        net = round(p1 + p2 - n1 - n2, 3)
+        youless_data_all.append(youless_data)
+        #self.wfile.write(content)
+        youless_data["tm"] = tm
+        youless_data["net"] = net
+        youless_data["pwr"] = pwr
+        youless_data["p1"] = p1
+        youless_data["p2"] = p2
+        youless_data["n1"] = n1
+        youless_data["n2"] = n2
+        youless_data["gas"] = gas
+        self.wfile.write(json.dumps(youless_data_all, separators=(',', ':')).encode('utf-8'))
+
+    def do_OPTIONS(self):
+        # Send allow-origin header for preflight POST XHRs.
+        self.send_response(HTTPStatus.NO_CONTENT.value)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET')
+        self.send_header('Access-Control-Allow-Headers', 'content-type')
+        self.end_headers()
+
+def show_usage():
+        print('p1server.py -s <server_ip> -t <token> [-p <dsmr_port>] [-o HA]')
+        print('    -o HA will use dsmr integration in HA, otherwise dsmr-reader api is used')
+
 def run_server(argv):
     port = '8811'
-    global dsmr_server
-    global dsmr_token
+    global server
+    global token
+    server_type = "dsmr_reader"
     try:
-        opts, args = getopt.getopt(argv, "hs:t:p:", ["server=", "token=", "port="])
+        opts, args = getopt.getopt(argv, "hs:t:p:o:", ["server=", "token=", "port=", "type="])
     except getopt.GetoptError:
-        print('p1server.py -s <dsmr_server_ip> -t <dsmr_token> -p <dsmr_port>')
+        show_usage()
         sys.exit(2)
     for opt, arg in opts:
         if opt == '-h':
-            print('p1server.py -s <dsmr_server_ip> -t <dsmr_token> -p <dsmr_port>')
+            show_usage()
             sys.exit()
         elif opt in ("-s", "--server"):
-            dsmr_server = arg
+            server = arg
         elif opt in ("-t", "--token"):
-            dsmr_token = arg
+            token = arg
         elif opt in ("-p", "--port"):
             port = int(arg)
+        elif opt in ("-o", "--type"):
+            server_type = arg
     server_address = ('', port)
-    if len(dsmr_server) == 0 or len(dsmr_token) == 0:
-        print('p1server.py -s <dsmr_server_ip> -t <dsmr_token> -p <dsmr_port>')
+    if len(server) == 0 or len(token) == 0:
+        show_usage()
         sys.exit()
-    print(f"Running p1server on port {port} using dsmr server {dsmr_server} and token {dsmr_token}")
-    httpd = HTTPServer(server_address, _RequestHandler)
+    print(f"Running p1server on port {port} using server {server} and token {token} with type {server_type}")
+    if server_type == "HA":
+        httpd = HTTPServer(server_address, _HARequestHandler)
+    else:
+        httpd = HTTPServer(server_address, _RequestHandler)
     print('serving at %s:%d' % server_address)
     httpd.serve_forever()
 
