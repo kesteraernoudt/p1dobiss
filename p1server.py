@@ -34,7 +34,12 @@ import getopt
 
 server = ""
 token = ""
+secure = False
 
+def get_url(server, secure):
+    if secure:
+        return f"https://{server}"
+    return f"http://{server}"
 
 class _RequestHandler(BaseHTTPRequestHandler):
     # Borrowing from https://gist.github.com/nitaku/10d0662536f37a087e1b
@@ -49,8 +54,9 @@ class _RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global server
         global token
+        global secure
         self._set_headers()
-        content = urllib.request.urlopen(urllib.request.Request(f"http://{server}:7777/api/v2/datalogger/dsmrreading?limit=1&ordering=-timestamp", headers = {"Authorization": f"Token {token}"})).read()
+        content = urllib.request.urlopen(urllib.request.Request(f"{get_url(server, secure)}:7777/api/v2/datalogger/dsmrreading?limit=1&ordering=-timestamp", headers = {"Authorization": f"Token {token}"})).read()
         dsmr_data = json.loads(content)["results"][0]
         youless_data_all = list()
         youless_data = dict()
@@ -62,7 +68,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         n1 = float(dsmr_data["electricity_returned_1"])
         n2 = float(dsmr_data["electricity_returned_2"])
         net = round(p1 + p2 - n1 - n2,3)
-        content = urllib.request.urlopen(urllib.request.Request(f"http://{server}:7777/api/v2/consumption/gas?limit=1&ordering=-read_at", headers = {"Authorization": f"Token {token}"})).read()
+        content = urllib.request.urlopen(urllib.request.Request(f"{get_url(server, secure)}:7777/api/v2/consumption/gas?limit=1&ordering=-read_at", headers = {"Authorization": f"Token {token}"})).read()
         dsmr_data = json.loads(content)["results"][0]
         gas = float(dsmr_data["delivered"])
         youless_data_all.append(youless_data)
@@ -99,8 +105,9 @@ class _HARequestHandler(BaseHTTPRequestHandler):
     def get_timestamp(self, sensor):
         global server
         global token
+        global secure
         content = urllib.request.urlopen(
-            urllib.request.Request(f"https://{server}:8123/api/states/sensor.{sensor}", 
+            urllib.request.Request(f"{get_url(server, secure)}:8123/api/states/sensor.{sensor}", 
             headers = {"Authorization": f"Bearer {token}"})
             ).read()
         answer = json.loads(content)
@@ -109,7 +116,8 @@ class _HARequestHandler(BaseHTTPRequestHandler):
     def get_data(self, sensor):
         global server
         global token
-        address = f"https://{server}:8123/api/states/sensor.{sensor}"
+        global secure
+        address = f"{get_url(server, secure)}:8123/api/states/sensor.{sensor}"
         header = f"Bearer {token}"
         #print(f"getting {address}")
         #print(f"with header {header}")
@@ -158,16 +166,18 @@ class _HARequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 def show_usage():
-        print('p1server.py -s <server_ip> -t <token> [-p <dsmr_port>] [-o HA]')
+        print('p1server.py -s <server_ip> -t <token> -S True|False [-o HA] [-p <port>]')
         print('    -o HA will use dsmr integration in HA, otherwise dsmr_reader api is used')
+        print('    -S or --secure: boolean, use https or http')
 
 def run_server(argv):
-    port = '8811'
+    port = 8811
     global server
     global token
+    global secure
     server_type = "dsmr_reader"
     try:
-        opts, args = getopt.getopt(argv, "hs:t:p:o:", ["server=", "token=", "port=", "type="])
+        opts, args = getopt.getopt(argv, "hs:t:p:o:S:", ["server=", "token=", "port=", "type=", "secure="])
     except getopt.GetoptError:
         show_usage()
         sys.exit(2)
@@ -183,11 +193,13 @@ def run_server(argv):
             port = int(arg)
         elif opt in ("-o", "--type"):
             server_type = arg
+        elif opt in ("-S", "--secure"):
+            secure = arg.lower() in ['true', '1', 't', 'y', 'yes']
     server_address = ('', port)
     if len(server) == 0 or len(token) == 0:
         show_usage()
         sys.exit()
-    print(f"Running p1server on port {port} using server {server} and token {token} with type {server_type}")
+    print(f"Running p1server on port {port} using server {server} (secure = {secure}; type = {server_type}) and token {token}")
     if server_type == "HA":
         httpd = HTTPServer(server_address, _HARequestHandler)
     else:
