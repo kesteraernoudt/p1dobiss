@@ -69,8 +69,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
         n2 = float(dsmr_data["electricity_returned_2"])
         net = round(p1 + p2 - n1 - n2,3)
         content = urllib.request.urlopen(urllib.request.Request(f"{get_url(server, secure)}:7777/api/v2/consumption/gas?limit=1&ordering=-read_at", headers = {"Authorization": f"Token {token}"})).read()
-        dsmr_data = json.loads(content)["results"][0]
-        gas = float(dsmr_data["delivered"])
+        results = json.loads(content)["results"]
+        gas = float(results[0]["delivered"]) if len(results) > 0 else 0.0
         youless_data_all.append(youless_data)
         #self.wfile.write(content)
         youless_data["tm"] = tm
@@ -139,7 +139,8 @@ class _HARequestHandler(BaseHTTPRequestHandler):
         n2 = float(self.get_data("energy_production_tarif_2"))
         current_cons = float(self.get_data("power_consumption"))
         current_prod = float(self.get_data("power_production"))
-        gas = float(self.get_data("gas_consumption"))
+        gas_string = self.get_data("gas_consumption")
+        gas = float(gas_string) if gas_string.lower() != "unknown" else 0.0
         timestamp = self.get_timestamp("energy_consumption_tarif_1")
         
         tm = int(dp.parse(timestamp).timestamp())
