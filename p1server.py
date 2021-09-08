@@ -140,7 +140,7 @@ class _HARequestHandler(BaseHTTPRequestHandler):
         current_cons = float(self.get_data("power_consumption"))
         current_prod = float(self.get_data("power_production"))
         gas_string = self.get_data("gas_consumption")
-        gas = float(gas_string) if gas_string.lower() != "unknown" else 0.0
+        gas = float(gas_string) if gas_string.lower() != "unknown" and gas_string.lower() != "unavailable" else 0.0
         timestamp = self.get_timestamp("energy_consumption_tarif_1")
         
         tm = int(dp.parse(timestamp).timestamp())
